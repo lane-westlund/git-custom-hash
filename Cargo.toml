@@ -1,0 +1,15 @@
+[package]
+name = "git-custom-hash"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+git2 = "0.16"
+sha1 = "0.10"
+num_cpus = "1.13"
+regex = "1.7"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
