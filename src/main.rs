@@ -150,10 +150,19 @@ fn main() {
     // Parse the -m parameter for the hidden message
     let hidden_message = get_argument_value(&args, "-m").filter(|hidden| is_valid_hex(hidden));
 
+    // Parse the -n parameter for the starting nonce (hexadecimal only, default to 1 if not provided)
+    let starting_nonce = get_argument_value(&args, "-n")
+        .map(|n| u64::from_str_radix(&n, 16).unwrap_or_else(|_| {
+            println!("Error: Invalid -n parameter. Please provide a valid hexadecimal value.");
+            println!("Usage: cargo run --release -- [-h <hash_prefix>] [-m <hidden_message>] [-n <starting_nonce>] [-j <num_threads>]");
+            std::process::exit(1);
+        }))
+        .unwrap_or(1); // Default to 1 if -n is not provided
+
     // Ensure at least one of -h or -m is provided
     if hex_parameter.is_none() && hidden_message.is_none() {
         println!("Error: You must provide at least one of -h (hash prefix) or -m (hidden message).");
-        println!("Usage: cargo run --release -- [-h <hash_prefix>] [-m <hidden_message>] [-j <num_threads>]");
+        println!("Usage: cargo run --release -- [-h <hash_prefix>] [-m <hidden_message>] [-n <starting_nonce>] [-j <num_threads>]");
         return;
     }
 
@@ -173,10 +182,12 @@ fn main() {
     if let Some(ref hidden) = hidden_message {
         println!("Searching for hidden message: {}", hidden);
     }
+    println!("Starting nonce: {:X}", starting_nonce); // Display the starting nonce in hex
     println!("Using {} threads.", num_threads);
 
     let hex_value = Arc::new(hex_parameter.unwrap_or_default());
     let hidden_message = Arc::new(hidden_message); // Share hidden message across threads
+    let nonce = Arc::new(AtomicU64::new(starting_nonce)); // Use the starting nonce
     let repo = Repository::open(".").expect("Failed to open Git repository");
     let head = repo.head().expect("Failed to get HEAD reference");
     let commit = head.peel_to_commit().expect("Failed to resolve HEAD to commit");
@@ -186,13 +197,12 @@ fn main() {
     let committer_name_raw = committer.name().unwrap_or("Unknown").to_string();
     let committer_name = Arc::new(sanitize_committer_name(&committer_name_raw));
     let raw_header = Arc::new(sanitize_raw_header(&raw_header_raw, &committer_name_raw, &committer_name));
-    let nonce = Arc::new(AtomicU64::new(1));
     let shared_result = Arc::new(AtomicU64::new(0)); // Now an AtomicU64
 
     // Start a monitoring thread to display nonce increase per 5 seconds
     let nonce_clone = Arc::clone(&nonce);
     thread::spawn(move || {
-        let mut previous_nonce = 0;
+        let mut previous_nonce = starting_nonce;
         loop {
             thread::sleep(Duration::from_secs(5));
             let current_nonce = nonce_clone.load(Ordering::SeqCst);
@@ -201,7 +211,7 @@ fn main() {
 
             // Round to the nearest thousand and format with "K"
             let hashes_per_thousand = (hashes_per_second + 500) / 1000; // Round to nearest thousand
-            println!("Hashes per second: {}K", hashes_per_thousand);
+            println!("Hashes per second: {}K\tMost recent nonce: {:X}", hashes_per_thousand, current_nonce);
         }
     });
 
